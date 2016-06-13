@@ -1,22 +1,16 @@
 import praw
-import sqlite3
 import time
 
 
-def get_row_exists(table, column, value):
-	c.execute("SELECT count(*) FROM "+table+" WHERE "+column+"=? COLLATE NOCASE", (value,))
-	data = c.fetchone()[0]
-	if data==0:
-		return False
-	else:
-		return True
+def get_entry_exists(submission_id):
+	for key in d.keys():
+		if key == submission_id:
+			return True
+	return False
 
 
 def gen_log(data):
-	f = open(LOGFILE, 'a')
 	datetime =  str(time.strftime("%Y/%m/%d")) + " " + str(time.strftime("%H:%M:%S"))
-	f.write(datetime + ": " + data + "\n")
-	f.close()
 	print datetime + ": " + data
 
 
@@ -24,15 +18,11 @@ def gen_log(data):
 r = praw.Reddit("/r/rainmeter source enforcer by /u/Pandemic21")
 USERNAME=''
 PASSWORD=''
-LOGFILE='/home/pandemic/Documents/scripts/rainmeter/rainmeter.log'
 GRACE_PERIOD=60*60*6 # 6 hours in seconds	
 COMMENT_TEXT="It looks like your submission does not comply with Rule B.1.\n\n>If you share a completed setup, provide download links to skins and wallpapers shown within six hours of posting.\n\nPlease reply to your submission with the download links."
 sub = r.get_subreddit("rainmeter")
-conn = sqlite3.connect('/home/pandemic/Documents/scripts/rainmeter/rainmeter.db')
-c = conn.cursor()
+d = {}
 
-c.execute("CREATE TABLE IF NOT EXISTS submissions (id text, time text)")
-conn.commit()
 r.login(USERNAME,PASSWORD,disable_warning=True)
 
 while 1:
@@ -42,29 +32,24 @@ while 1:
 		if post.is_self:
 			gen_log(post.id + " is a self-post")
 			continue
-		if get_row_exists("submissions", "id", post.id):
+		if get_entry_exists(post.id):
 			gen_log(post.id + " has already been added")
 			continue
 		gen_log("Adding " + post.id)
-		c.execute("INSERT INTO submissions VALUES (?, ?)", (post.id, str(post.created_utc + GRACE_PERIOD)))
-		conn.commit()
+		d[post.id] = int(post.created_utc) + GRACE_PERIOD
 
 	#check old submissions
 	t = time.time()
-	c.execute("SELECT * FROM submissions")
-	rows = c.fetchall()
 
-	for row in rows:
-		if float(row[1]) > t:
-			gen_log(row[0] + " has " + str(float(row[1])-t) + " seconds left")
+	for key in d.keys():
+		if float(d[key]) > t:
+			gen_log(str(key) + " has " + str(int((d[key])-t)/60) + " minutes left")
 			continue
 
-		gen_log("Checking " + row[0] + "...")
-		c.execute("DELETE FROM submissions WHERE id=?", (row[0],))
-		conn.commit()
-
+		gen_log("Checking " + str(key) + "...")
+		
 		op_has_replied = False
-		s = r.get_submission(submission_id=row[0])
+		s = r.get_submission(submission_id=key)
 		op = str(s.author)
 		comments = s.comments
 
@@ -76,5 +61,7 @@ while 1:
 			continue
 		gen_log("OP hasn't replied, adding comment")
 		s.add_comment(COMMENT_TEXT)
+		#delete dictionary entry
+		d.pop(key)
 
-	time.sleep(60*5)
+	time.sleep(60)
